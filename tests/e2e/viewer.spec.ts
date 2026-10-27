@@ -145,6 +145,83 @@ test('side-by-side keeps zoom and synchronizes panning', async ({ page }) => {
   await page.getByRole('button', { name: 'Split Screen', exact: true }).click();
   await expect(page.getByTestId('stage')).toHaveAttribute('data-zoom', '2');
 });
+test('magnifier follows the cursor and shows matching lenses in Side-by-Side', async ({ page }) => {
+  await openComparison(page);
+  await page.getByRole('button', { name: 'Magnifier', exact: true }).click();
+  const stage = await page.getByTestId('stage').boundingBox();
+  const point = { x: stage!.x + stage!.width * 0.3, y: stage!.y + stage!.height * 0.4 };
+  await page.mouse.move(point.x, point.y);
+  const splitLens = page.getByTestId('magnifier');
+  await expect(splitLens).toBeVisible();
+  await expect(splitLens).toHaveAttribute('data-mode', 'split');
+  // Split mode mirrors the clipped stage, so both images appear in the lens.
+  await expect(splitLens.locator('img.comparison-image')).toHaveCount(2);
+  const splitBox = await splitLens.boundingBox();
+  expect(splitBox!.x + splitBox!.width / 2).toBeCloseTo(point.x, 0);
+  expect(splitBox!.y + splitBox!.height / 2).toBeCloseTo(point.y, 0);
+
+  await page.getByRole('button', { name: 'Side-by-Side', exact: true }).click();
+  await page.mouse.move(point.x, point.y);
+  const lensA = page.getByTestId('magnifier-a'),
+    lensB = page.getByTestId('magnifier-b');
+  await expect(lensA).toBeVisible();
+  await expect(lensB).toBeVisible();
+  await expect(lensA.locator('img.magnifier-image')).toHaveCount(1);
+  await expect(lensB.locator('img.magnifier-image')).toHaveCount(1);
+
+  // Both lenses sit on the same source pixel, one in each image.
+  const imageA = await page.getByTestId('image-A').boundingBox(),
+    imageB = await page.getByTestId('image-B').boundingBox(),
+    boxA = await lensA.boundingBox(),
+    boxB = await lensB.boundingBox();
+  const sourceA = {
+    x: (boxA!.x + boxA!.width / 2 - imageA!.x) / (imageA!.width / 640),
+    y: (boxA!.y + boxA!.height / 2 - imageA!.y) / (imageA!.width / 640),
+  };
+  const sourceB = {
+    x: (boxB!.x + boxB!.width / 2 - imageB!.x) / (imageB!.width / 640),
+    y: (boxB!.y + boxB!.height / 2 - imageB!.y) / (imageB!.width / 640),
+  };
+  expect(sourceA.x).toBeCloseTo(sourceB.x, 1);
+  expect(sourceA.y).toBeCloseTo(sourceB.y, 1);
+
+  await page.mouse.move(stage!.x - 20, stage!.y + 20);
+  await expect(lensA).toHaveCount(0);
+  await expect(lensB).toHaveCount(0);
+});
+test('magnifier options adjust glass size, shape, and zoom strength', async ({ page }) => {
+  await openComparison(page);
+  await page.getByRole('button', { name: 'Magnifier', exact: true }).click();
+  const options = page.getByRole('group', { name: 'Magnifier options' });
+  const stage = await page.getByTestId('stage').boundingBox();
+  await expect(options).toBeVisible();
+
+  // Dragging a slider must not start a stage pan.
+  const imageBefore = await page.getByTestId('image-A').boundingBox();
+  const sizeSlider = page.getByRole('slider', { name: 'Glass size' });
+  const sliderBox = await sizeSlider.boundingBox();
+  await page.mouse.move(sliderBox!.x + 12, sliderBox!.y + sliderBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sliderBox!.x + 70, sliderBox!.y + sliderBox!.height / 2, { steps: 4 });
+  await page.mouse.up();
+  expect(await page.getByTestId('image-A').boundingBox()).toEqual(imageBefore);
+
+  await page.getByRole('slider', { name: 'Glass size' }).press('Home');
+  await page.getByRole('slider', { name: 'Corner radius' }).press('Home');
+  await page.getByRole('slider', { name: 'Zoom strength' }).press('End');
+
+  // The options hide once the pointer leaves the magnifier control.
+  await page.mouse.move(stage!.x + stage!.width / 2, stage!.y + stage!.height / 2);
+  await expect(options).toHaveCount(0);
+  const lens = page.getByTestId('magnifier');
+  await expect(lens).toHaveAttribute('data-magnifier-size', '100');
+  await expect(lens).toHaveAttribute('data-magnifier-zoom', '8');
+  await expect(lens).toHaveAttribute('data-border-radius', '0');
+  await expect.poll(async () => (await lens.boundingBox())!.width).toBe(100);
+  await expect
+    .poll(() => lens.evaluate((element) => getComputedStyle(element).borderRadius))
+    .toBe('0%');
+});
 test('selects any of four images, renames labels, and saves metadata', async ({ page }) => {
   await openComparison(page, 4);
   await page.getByLabel('Select image A').selectOption('2');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { originFor, panBy, pinchAt, scaleFor, zoomAt } from '../../src/lib/geometry';
+import { originFor, panBy, pinchAt, scaleFor, sourceAt, zoomAt } from '../../src/lib/geometry';
 import { manifestSchema, emptyMetadata, emptyImageMetadata, type View } from '../../shared/model';
 const panel = { width: 1000, height: 600 },
   image = { width: 2000, height: 1000 };
@@ -21,6 +21,18 @@ describe('shared image coordinates', () => {
   it('pans both panels by the same source distance', () => {
     const moved = panBy(fit, { x: 20, y: -40 }, 0.5);
     expect(moved.center).toEqual({ x: 960, y: 580 });
+  });
+  it('maps a panel point back to its source coordinate for the magnifier', () => {
+    const position = { x: 0, y: 0 };
+    expect(sourceAt(fit, panel, 0.5, 1, position, { x: 250, y: 200 })).toEqual({
+      x: 500,
+      y: 300,
+    });
+    const zoomed = { zoom: 1, center: { x: 400, y: 250 } } as View;
+    expect(sourceAt(zoomed, panel, 0.5, 2, position, { x: 500, y: 300 })).toEqual({
+      x: 400,
+      y: 250,
+    });
   });
   it('snaps the origin to physical pixels at integer magnification', () => {
     const origin = originFor({ zoom: 1, center: { x: 123.33, y: 77.78 } }, panel, 0.5, 2);

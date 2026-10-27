@@ -544,7 +544,9 @@ export default function App() {
         <Modal title="A closer look at every pixel" onClose={() => setModal(null)}>
           <p className="muted">
             Drag the image to pan. Scroll to zoom at the cursor. On touchscreens, drag with one
-            finger and pinch with two.
+            finger and pinch with two; with the magnifier on, one finger moves the lens and two
+            fingers still pan and zoom. Hover or tap the magnifier icon to adjust the glass size,
+            corner radius, and zoom strength.
           </p>
           <dl className="shortcuts">
             <dt>0</dt>
@@ -557,6 +559,8 @@ export default function App() {
             <dd>Pan the images</dd>
             <dt>S / V</dt>
             <dd>Split Screen / Side-by-Side</dd>
+            <dt>M</dt>
+            <dd>Toggle the magnifier</dd>
             <dt>X</dt>
             <dd>Swap image A and B</dd>
             <dt>[ / ]</dt>

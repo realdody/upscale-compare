@@ -13,6 +13,36 @@ test('mobile keeps all main controls accessible without horizontal scrolling', a
   await expect(page.getByTestId('image-A')).toBeVisible();
   await page.screenshot({ path: 'test-results/viewer-mobile.png' });
 });
+test('touch can position the magnifier and open its options', async ({ page }) => {
+  await openComparison(page);
+  await page.getByRole('button', { name: 'Magnifier', exact: true }).tap();
+  const options = page.getByRole('group', { name: 'Magnifier options' });
+  await expect(options).toBeVisible();
+
+  const stage = await page.getByTestId('stage').boundingBox();
+  const start = {
+    x: Math.round(stage!.x + stage!.width * 0.4),
+    y: Math.round(stage!.y + stage!.height * 0.45),
+  };
+  await page.touchscreen.tap(start.x, start.y);
+  await expect(options).toHaveCount(0);
+  const lens = page.getByTestId('magnifier');
+  await expect(lens).toBeVisible();
+  const before = await lens.boundingBox();
+
+  const client = await page.context().newCDPSession(page);
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: start.x, y: start.y, id: 1 }],
+  });
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ x: start.x + 70, y: start.y, id: 1 }],
+  });
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await expect.poll(async () => (await lens.boundingBox())!.x).toBeGreaterThan(before!.x + 40);
+  expect((await lens.boundingBox())!.x - before!.x).toBeCloseTo(70, 0);
+});
 test('touch divider and synchronized pinch navigation respond to touch input', async ({ page }) => {
   await openComparison(page);
   const stage = await page.getByTestId('stage').boundingBox();

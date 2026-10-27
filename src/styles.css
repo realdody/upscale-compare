@@ -506,12 +506,131 @@ input[type='checkbox'] {
   text-align: center;
   pointer-events: none;
 }
+.magnifier {
+  position: absolute;
+  z-index: 3;
+  border-radius: 50%;
+  overflow: hidden;
+  pointer-events: none;
+  background: #17191e;
+  border: 1.5px solid #eef6e5d9;
+  box-shadow:
+    0 6px 22px #000a,
+    inset 0 0 0 1px #0008;
+}
+.magnifier-content {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.magnifier-image {
+  pointer-events: none;
+}
+.magnifier-tag {
+  position: absolute;
+  z-index: 1;
+  top: 15%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  background: #111318d9;
+  border: 1px solid #ffffff1f;
+  color: #c8eab1;
+}
+.magnifier-tag-a {
+  left: 17%;
+}
+.magnifier-tag-b {
+  right: 17%;
+  color: #c1ceff;
+}
+.magnifier-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  opacity: 0.65;
+}
+.magnifier-crosshair:before,
+.magnifier-crosshair:after {
+  content: '';
+  position: absolute;
+  background: #eef6e5;
+  box-shadow: 0 0 2px #000a;
+}
+.magnifier-crosshair:before {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.magnifier-crosshair:after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.magnifier-control {
+  position: relative;
+  display: flex;
+}
+.magnifier-options {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 232px;
+  padding: 12px;
+  border: 1px solid #3a3f48;
+  border-radius: 8px;
+  background: #15171bf2;
+  box-shadow: 0 6px 22px #0008;
+  cursor: default;
+  backdrop-filter: blur(10px);
+}
+.magnifier-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #bfc3cb;
+  font-size: 10px;
+  font-weight: 500;
+}
+.magnifier-option-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.magnifier-option-heading output {
+  color: #c6e7af;
+  font-variant-numeric: tabular-nums;
+}
+.magnifier-option input[type='range'] {
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
 .inspection-toolbar {
   position: absolute;
   bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 2;
+  z-index: 4;
   display: flex;
   align-items: center;
   gap: 2px;

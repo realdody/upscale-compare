@@ -59,6 +59,17 @@ export function zoomAt(
     },
   };
 }
+export function sourceAt(
+  view: View,
+  panel: Size,
+  scale: number,
+  dpr: number,
+  panelPosition: Point,
+  point: Point,
+): Point {
+  const origin = originFor(view, panel, scale, dpr, panelPosition);
+  return { x: (point.x - origin.x) / scale, y: (point.y - origin.y) / scale };
+}
 export function panBy(view: View, delta: Point, scale: number): View {
   return {
     ...view,

@@ -8,6 +8,7 @@ A focused, open-source image quality comparison tool for game screenshots. Compa
 - Two to four PNG, JPEG, or static WebP screenshots, editable labels, and original resolution/file information.
 - Split Screen with an accessible draggable divider and synchronized Side-by-Side inspection.
 - Cursor-centered wheel zoom, drag navigation, touch pan and pinch, fullscreen, and keyboard shortcuts.
+- Magnifier lens that follows the cursor: in Split Screen it magnifies the image under the lens (both images at the divider), and in Side-by-Side it shows two lenses locked to the same source pixel, one on each image. Hover or tap the magnifier icon for glass size, corner radius (circle or square), and zoom strength. On touchscreens, drag one finger to move the lens; two fingers pan and zoom.
 - Fit plus physical-pixel 100%, 200%, and 400% presets. 100% means one source pixel per physical display pixel, including on HiDPI displays.
 - Optional game, upscaler, preset, rendering resolution, GPU, graphics settings, and description metadata.
 - Explicit public publishing, immutable comparison snapshots, short share links, social preview metadata, private deletion keys, and operator moderation.

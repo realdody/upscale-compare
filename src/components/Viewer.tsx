@@ -3,11 +3,12 @@ import {
   useEffect,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type TouchEvent as ReactTouchEvent,
 } from 'react';
 import { snapshotContacts, sameContacts, samePositions } from '../lib/contact-snapshot';
 import type { Point } from '../lib/geometry';
-import { Expand, Info, Keyboard, Minus, Plus, Shrink } from 'lucide-react';
+import { Expand, Info, Keyboard, Minus, Plus, Search, Shrink } from 'lucide-react';
 import type { Config, LocalImage, View } from '../../shared/model';
 import {
   gestureDiagnostics,
@@ -15,7 +16,7 @@ import {
   diagnosticViewport,
   type DiagnosticData,
 } from '../lib/gesture-diagnostics';
-import { clamp, originFor, panBy, pinchAt, scaleFor, zoomAt } from '../lib/geometry';
+import { clamp, originFor, panBy, pinchAt, scaleFor, sourceAt, zoomAt } from '../lib/geometry';
 
 interface Props {
   images: LocalImage[];
@@ -24,6 +25,15 @@ interface Props {
   onMetadata: () => void;
   onHelp: () => void;
 }
+interface MagnifierOptions {
+  size: number;
+  radius: number;
+  zoom: number;
+}
+interface LensPoint extends Point {
+  touch: boolean;
+}
+const defaultMagnifierOptions: MagnifierOptions = { size: 240, radius: 50, zoom: 3 };
 export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) {
   const stage = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 1, height: 1, x: 0, y: 0 });
@@ -35,6 +45,12 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
   const pinchRightPanel = useRef<boolean | null>(null);
   const touchPinch = useRef(false);
   const [panning, setPanning] = useState(false);
+  const [magnifier, setMagnifier] = useState(false);
+  const [magnifierOptions, setMagnifierOptions] =
+    useState<MagnifierOptions>(defaultMagnifierOptions);
+  const [showMagnifierOptions, setShowMagnifierOptions] = useState(false);
+  const [lens, setLens] = useState<LensPoint | null>(null);
+  const magnifierOptionsTimer = useRef<number | null>(null);
   const endPointer = useCallback((pointerId: number, reason = 'pointerup') => {
     pointers.current.delete(pointerId);
     if (pointers.current.size < 2 && touchContacts.current.size < 2) pinchRightPanel.current = null;
@@ -185,6 +201,48 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
       document.removeEventListener('fullscreenchange', fullscreenChange);
     };
   }, []);
+  const clearMagnifierOptionsTimer = () => {
+    if (magnifierOptionsTimer.current !== null) {
+      window.clearTimeout(magnifierOptionsTimer.current);
+      magnifierOptionsTimer.current = null;
+    }
+  };
+  const revealMagnifierOptions = () => {
+    clearMagnifierOptionsTimer();
+    setShowMagnifierOptions(true);
+  };
+  const hideMagnifierOptionsSoon = (event?: ReactPointerEvent<Element>) => {
+    if (event?.pointerType === 'touch') return;
+    clearMagnifierOptionsTimer();
+    magnifierOptionsTimer.current = window.setTimeout(() => {
+      magnifierOptionsTimer.current = null;
+      setShowMagnifierOptions(false);
+    }, 140);
+  };
+  useEffect(
+    () => () => {
+      if (magnifierOptionsTimer.current !== null)
+        window.clearTimeout(magnifierOptionsTimer.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!showMagnifierOptions) return;
+    const close = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.magnifier-options, .magnifier-toggle')) return;
+      setShowMagnifierOptions(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowMagnifierOptions(false);
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [showMagnifierOptions]);
   const updateView = (action: (view: View) => View) =>
     onChange((previous) => ({ ...previous, view: action(previous.view) }));
   const setZoom = (zoom: number | null) =>
@@ -286,6 +344,7 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
           '-',
           's',
           'v',
+          'm',
           'x',
           'f',
           '?',
@@ -320,6 +379,10 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
         }));
       if (event.key === 's' || event.key === 'v')
         onChange((previous) => ({ ...previous, mode: event.key === 's' ? 'split' : 'side' }));
+      if (event.key === 'm' || event.key === 'M') {
+        setMagnifier((enabled) => !enabled);
+        setLens(null);
+      }
       if (event.key === 'x')
         onChange((previous) => ({
           ...previous,
@@ -463,7 +526,7 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
       (contact) =>
         contact.target instanceof Element &&
         event.currentTarget.contains(contact.target) &&
-        !contact.target.closest('button'),
+        !contact.target.closest('button,.inspection-toolbar'),
     );
     if (
       phase === 'start' &&
@@ -498,6 +561,16 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
           config.mode === 'side' && (first.x + second.x) / 2 - rect.left > panel.width;
       }
     }
+    // With the magnifier on, one finger moves the lens; two fingers still navigate the image.
+    if (magnifier && next.size === 1) {
+      const [point] = [...next.values()];
+      const rect = event.currentTarget.getBoundingClientRect();
+      setLens({
+        x: clamp(point.x - rect.left, 0, rect.width),
+        y: clamp(point.y - rect.top, 0, rect.height),
+        touch: true,
+      });
+    } else if (magnifier && next.size >= 2) setLens(null);
     const diagnosticEvent = gestureDiagnostics?.eventId(event.nativeEvent);
     if (gestureDiagnostics?.recording)
       gestureDiagnostics.record('touch-snapshot-handler', {
@@ -507,7 +580,12 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
         ...diagnosticPointers(),
       });
     // Only move on a complete, stable-identity frame. Contact changes rebase without motion.
-    if (phase === 'move' && sameContacts(previous, next) && !samePositions(previous, next))
+    if (
+      phase === 'move' &&
+      !(magnifier && next.size === 1) &&
+      sameContacts(previous, next) &&
+      !samePositions(previous, next)
+    )
       moveContacts(
         [...previous.values()],
         [...next.values()],
@@ -524,7 +602,11 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
         [...pointers.current.values()].some((point) => point.pointerType !== 'touch'),
     );
   };
-  const layer = (image: LocalImage, side: 'A' | 'B') => {
+  const layer = (
+    image: LocalImage,
+    side: 'A' | 'B',
+    options: { testId?: boolean; pixelated?: boolean } = {},
+  ) => {
     const panelOffset = config.mode === 'side' && side === 'B' ? panel.width + 1 : 0;
     const origin = originFor(config.view, panel, scale, dpr, {
       x: size.x + panelOffset,
@@ -533,9 +615,9 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
     return (
       <img
         className="comparison-image"
-        data-testid={`image-${side}`}
+        data-testid={options.testId === false ? undefined : `image-${side}`}
         src={image.url}
-        alt={image.label}
+        alt={options.testId === false ? '' : image.label}
         draggable={false}
         width={image.width}
         height={image.height}
@@ -545,11 +627,118 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
           transform: `translate(${origin.x + panelOffset}px, ${origin.y}px)`,
           width: image.width * scale,
           height: image.height * scale,
-          imageRendering: config.view.zoom !== null && config.view.zoom >= 1 ? 'pixelated' : 'auto',
+          imageRendering:
+            (options.pixelated ?? (config.view.zoom !== null && config.view.zoom >= 1))
+              ? 'pixelated'
+              : 'auto',
         }}
       />
     );
   };
+  const magnifierZoom = magnifierOptions.zoom;
+  const magnifierSize = Math.round(
+    Math.max(40, Math.min(magnifierOptions.size, size.width - 8, size.height - 8)),
+  );
+  const sideLensSize = Math.round(
+    Math.max(
+      40,
+      Math.min(magnifierOptions.size, panel.width * 0.65, panel.width - 8, size.height - 8),
+    ),
+  );
+  const lensRadius = `${magnifierOptions.radius}%`;
+  const splitLensCenter = lens
+    ? {
+        x: clamp(lens.x, magnifierSize / 2, size.width - magnifierSize / 2),
+        y: clamp(
+          lens.y - (lens.touch ? magnifierSize * 0.65 : 0),
+          magnifierSize / 2,
+          size.height - magnifierSize / 2,
+        ),
+      }
+    : null;
+  const lensScale = scale * magnifierZoom;
+  const lensPanelOffset =
+    config.mode === 'side' && lens && lens.x > panel.width ? panel.width + 1 : 0;
+  const lensSource =
+    lens && config.mode === 'side'
+      ? sourceAt(
+          config.view,
+          panel,
+          scale,
+          dpr,
+          { x: size.x + lensPanelOffset, y: size.y },
+          { x: lens.x - lensPanelOffset, y: lens.y },
+        )
+      : null;
+  const lensImage = (image: LocalImage) => {
+    if (!lensSource) return null;
+    return (
+      <img
+        className="comparison-image magnifier-image"
+        src={image.url}
+        alt=""
+        draggable={false}
+        width={image.width}
+        height={image.height}
+        style={{
+          left: sideLensSize / 2 - lensSource.x * lensScale,
+          top: sideLensSize / 2 - lensSource.y * lensScale,
+          width: image.width * lensScale,
+          height: image.height * lensScale,
+          imageRendering: lensScale * dpr >= 1 ? 'pixelated' : 'auto',
+        }}
+      />
+    );
+  };
+  // Side-by-side: one lens per image, both centered on the same source coordinate.
+  const sideLens = (image: LocalImage, side: 'A' | 'B') => {
+    if (!lensSource) return null;
+    const panelOffset = side === 'B' ? panel.width + 1 : 0;
+    const origin = originFor(config.view, panel, scale, dpr, {
+      x: size.x + panelOffset,
+      y: size.y,
+    });
+    const center = {
+      x: clamp(
+        panelOffset + origin.x + lensSource.x * scale,
+        panelOffset + sideLensSize / 2,
+        panelOffset + panel.width - sideLensSize / 2,
+      ),
+      y: clamp(
+        origin.y + lensSource.y * scale - (lens?.touch ? sideLensSize * 0.65 : 0),
+        sideLensSize / 2,
+        size.height - sideLensSize / 2,
+      ),
+    };
+    const name = side.toLowerCase();
+    return (
+      <div
+        className="magnifier"
+        data-testid={`magnifier-${name}`}
+        data-mode="side"
+        data-magnifier-size={sideLensSize}
+        data-magnifier-zoom={magnifierZoom}
+        data-border-radius={magnifierOptions.radius}
+        aria-hidden="true"
+        style={{
+          left: center.x - sideLensSize / 2,
+          top: center.y - sideLensSize / 2,
+          width: sideLensSize,
+          height: sideLensSize,
+          borderRadius: lensRadius,
+        }}
+      >
+        {lensImage(image)}
+        <span className={`magnifier-tag magnifier-tag-${name}`}>{side}</span>
+        <span className="magnifier-crosshair" />
+      </div>
+    );
+  };
+  const dividerClip = {
+    a: `inset(0 ${(1 - config.divider) * 100}% 0 0)`,
+    b: `inset(0 0 0 ${config.divider * 100}%)`,
+  };
+
   return (
     <div className="viewer-content">
       <div
@@ -573,7 +762,10 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
           if (!touchPinch.current) setZoom(config.view.zoom === 1 ? null : 1);
         }}
         onPointerDown={(event) => {
-          if (event.button !== 0 || (event.target as HTMLElement).closest('button,[role=slider]'))
+          if (
+            event.button !== 0 ||
+            (event.target as HTMLElement).closest('button,[role=slider],.inspection-toolbar')
+          )
             return;
           // Pointer capture does not suppress native selection or selection dragging.
           event.preventDefault();
@@ -596,6 +788,7 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
             pinchRightPanel.current =
               config.mode === 'side' && (first.x + second.x) / 2 - rect.left > panel.width;
           }
+          if (magnifier && pointers.current.size >= 2) setLens(null);
           if (gestureDiagnostics?.recording)
             gestureDiagnostics.record('pointer-down-handler', {
               eventId: gestureDiagnostics.eventId(event.nativeEvent),
@@ -604,6 +797,18 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
           setPanning(true);
         }}
         onPointerMove={(event) => {
+          if (event.pointerType !== 'touch' && magnifier) {
+            const target = event.target as HTMLElement;
+            if (target.closest('.inspection-toolbar')) setLens(null);
+            else {
+              const rect = event.currentTarget.getBoundingClientRect();
+              setLens({
+                x: clamp(event.clientX - rect.left, 0, rect.width),
+                y: clamp(event.clientY - rect.top, 0, rect.height),
+                touch: false,
+              });
+            }
+          }
           const diagnosticEvent = gestureDiagnostics?.eventId(event.nativeEvent);
           const old = pointers.current.get(event.pointerId);
           if (!old) {
@@ -636,6 +841,15 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
             : undefined;
           const next = { x: event.clientX, y: event.clientY, pointerType: event.pointerType };
           pointers.current.set(event.pointerId, next);
+          if (event.pointerType === 'touch' && magnifier && pointers.current.size === 1) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setLens({
+              x: clamp(event.clientX - rect.left, 0, rect.width),
+              y: clamp(event.clientY - rect.top, 0, rect.height),
+              touch: true,
+            });
+            return;
+          }
           if (event.pointerType === 'touch' && nativeTouchSeen.current) {
             if (gestureDiagnostics?.recording)
               gestureDiagnostics.record('pointer-observation', {
@@ -658,6 +872,9 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
         onTouchEnd={(event) => nativeTouches(event, 'end')}
         onTouchCancel={(event) => nativeTouches(event, 'end')}
         onPointerUp={(event) => endPointer(event.pointerId)}
+        onPointerLeave={(event) => {
+          if (event.pointerType !== 'touch') setLens(null);
+        }}
         onPointerCancel={(event) => endPointer(event.pointerId, 'pointercancel')}
         onLostPointerCapture={(event) => {
           if (event.target === event.currentTarget)
@@ -666,16 +883,10 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
       >
         {config.mode === 'split' ? (
           <>
-            <div
-              className="image-panel split-layer"
-              style={{ clipPath: `inset(0 ${(1 - config.divider) * 100}% 0 0)` }}
-            >
+            <div className="image-panel split-layer" style={{ clipPath: dividerClip.a }}>
               {layer(a, 'A')}
             </div>
-            <div
-              className="image-panel split-layer"
-              style={{ clipPath: `inset(0 0 0 ${config.divider * 100}%)` }}
-            >
+            <div className="image-panel split-layer" style={{ clipPath: dividerClip.b }}>
               {layer(b, 'B')}
             </div>
             <div
@@ -754,6 +965,48 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
             </div>
           </div>
         )}
+        {magnifier && lens && splitLensCenter && config.mode === 'split' && (
+          <div
+            className="magnifier"
+            data-testid="magnifier"
+            data-mode="split"
+            data-magnifier-size={magnifierSize}
+            data-magnifier-zoom={magnifierZoom}
+            data-border-radius={magnifierOptions.radius}
+            aria-hidden="true"
+            style={{
+              left: splitLensCenter.x - magnifierSize / 2,
+              top: splitLensCenter.y - magnifierSize / 2,
+              width: magnifierSize,
+              height: magnifierSize,
+              borderRadius: lensRadius,
+            }}
+          >
+            <div
+              className="magnifier-content"
+              style={{
+                width: size.width,
+                height: size.height,
+                transformOrigin: '0 0',
+                transform: `translate(${magnifierSize / 2 - lens.x * magnifierZoom}px, ${magnifierSize / 2 - lens.y * magnifierZoom}px) scale(${magnifierZoom})`,
+              }}
+            >
+              <div className="image-panel split-layer" style={{ clipPath: dividerClip.a }}>
+                {layer(a, 'A', { testId: false, pixelated: lensScale * dpr >= 1 })}
+              </div>
+              <div className="image-panel split-layer" style={{ clipPath: dividerClip.b }}>
+                {layer(b, 'B', { testId: false, pixelated: lensScale * dpr >= 1 })}
+              </div>
+            </div>
+            <span className="magnifier-crosshair" />
+          </div>
+        )}
+        {magnifier && lens && config.mode === 'side' && (
+          <>
+            {sideLens(a, 'A')}
+            {sideLens(b, 'B')}
+          </>
+        )}
         <span className="image-badge badge-a">
           <b>A</b>
           {a.label}
@@ -810,6 +1063,103 @@ export function Viewer({ images, config, onChange, onMetadata, onHelp }: Props) 
             <Plus size={15} />
           </button>
           <span className="toolbar-separator" />
+          <div
+            className="magnifier-control"
+            onPointerEnter={revealMagnifierOptions}
+            onPointerLeave={hideMagnifierOptionsSoon}
+          >
+            <button
+              className={`icon-button magnifier-toggle ${magnifier ? 'selected' : ''}`}
+              aria-label="Magnifier"
+              aria-pressed={magnifier}
+              title="Magnifier (M) · hover for options"
+              onFocus={revealMagnifierOptions}
+              onClick={() => {
+                revealMagnifierOptions();
+                setMagnifier((enabled) => !enabled);
+                setLens(null);
+              }}
+            >
+              <Search size={16} />
+            </button>
+            {showMagnifierOptions && (
+              <div
+                className="magnifier-options"
+                role="group"
+                aria-label="Magnifier options"
+                onPointerEnter={revealMagnifierOptions}
+                onPointerLeave={hideMagnifierOptionsSoon}
+                onFocus={revealMagnifierOptions}
+              >
+                <label className="magnifier-option">
+                  <span className="magnifier-option-heading">
+                    <span>Glass size</span>
+                    <output>{magnifierOptions.size}px</output>
+                  </span>
+                  <input
+                    type="range"
+                    min={100}
+                    max={400}
+                    step={10}
+                    aria-label="Glass size"
+                    value={magnifierOptions.size}
+                    onChange={(event) =>
+                      setMagnifierOptions((previous) => ({
+                        ...previous,
+                        size: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label className="magnifier-option">
+                  <span className="magnifier-option-heading">
+                    <span>Corner radius</span>
+                    <output>
+                      {magnifierOptions.radius === 0
+                        ? 'Square'
+                        : magnifierOptions.radius === 50
+                          ? 'Circle'
+                          : `${magnifierOptions.radius}%`}
+                    </output>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={50}
+                    step={1}
+                    aria-label="Corner radius"
+                    value={magnifierOptions.radius}
+                    onChange={(event) =>
+                      setMagnifierOptions((previous) => ({
+                        ...previous,
+                        radius: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label className="magnifier-option">
+                  <span className="magnifier-option-heading">
+                    <span>Zoom strength</span>
+                    <output>{magnifierOptions.zoom}×</output>
+                  </span>
+                  <input
+                    type="range"
+                    min={1.5}
+                    max={8}
+                    step={0.5}
+                    aria-label="Zoom strength"
+                    value={magnifierOptions.zoom}
+                    onChange={(event) =>
+                      setMagnifierOptions((previous) => ({
+                        ...previous,
+                        zoom: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+            )}
+          </div>
           <button
             className="icon-button"
             aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
